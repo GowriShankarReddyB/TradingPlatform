@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  format-check:
+    name: Check Code Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      
+      - name: Check formatting
+        run: |
+          find src include tests -name "*.cpp" -o -name "*.hpp" | \
+          xargs clang-format --dry-run -Werror
+
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+        compiler:
+          - { cc: gcc-10, cxx: g++-10 }
+          - { cc: clang-13, cxx: clang++-13 }
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libboost-all-dev \
+            libcurl4-openssl-dev \
+            libsqlite3-dev \
+            ${{ matrix.compiler.cc }} \
+            ${{ matrix.compiler.cxx }}
+      
+      - name: Configure CMake
+        env:
+          CC: ${{ matrix.compiler.cc }}
+          CXX: ${{ matrix.compiler.cxx }}
+        run: |
+          mkdir build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ..
+      
+      - name: Build
+        run: |
+          cd build
+          make -j$(nproc)
+      
+      - name: Run Tests
+        run: |
+          cd build
+          ./test_runner --success
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libboost-all-dev \
+            libcurl4-openssl-dev \
+            libsqlite3-dev \
+            lcov
+      
+      - name: Build with coverage
+        run: |
+          mkdir build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_FLAGS="--coverage" \
+                -DCMAKE_EXE_LINKER_FLAGS="--coverage" ..
+          make -j$(nproc)
+      
+      - name: Run tests
+        run: |
+          cd build
+          ./test_runner
+      
+      - name: Generate coverage report
+        run: |
+          cd build
+          lcov --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+          lcov --list coverage.info

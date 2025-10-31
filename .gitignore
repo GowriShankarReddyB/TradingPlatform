@@ -1,0 +1,43 @@
+# Build directories
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Test outputs
+Testing/
+*.log
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Environment files
+.env
+!.env.example
+
+# Executables
+pulseexec
+test_runner
+bench_runner
+
+# OS files
+.DS_Store
+Thumbs.db

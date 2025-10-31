@@ -361,3 +361,4 @@ For issues, questions, or contributions, please open an issue on GitHub.
 ---
 
 **Note**: This is test software for educational purposes. Do not use with real funds or production API keys.
+# TradingPlatform

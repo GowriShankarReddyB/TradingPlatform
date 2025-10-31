@@ -31,7 +31,7 @@ Testing/
 
 # Environment files
 .env
-!.env.example
+.env.example
 
 # Executables
 pulseexec
@@ -41,3 +41,5 @@ bench_runner
 # OS files
 .DS_Store
 Thumbs.db
+.env.example
+docs/AUTHENTICATION_FIX.md

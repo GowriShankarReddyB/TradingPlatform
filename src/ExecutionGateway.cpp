@@ -28,23 +28,25 @@ ExecutionGateway::~ExecutionGateway() { curl_global_cleanup(); }
 ExecutionResult ExecutionGateway::place_order(const OrderRequest& request) {
   ExecutionResult result;
 
-  // Build JSON request
-  json j;
-  j["instrument_name"] = request.symbol;
-  j["amount"] = request.amount;
-  j["type"] = to_string(request.type);
+  // Build JSON-RPC 2.0 request body for Deribit
+  json params;
+  params["instrument_name"] = request.symbol;
+  params["amount"] = request.amount;
+  params["type"] = to_string(request.type);
 
   if (request.type == OrderType::LIMIT) {
-    j["price"] = request.price;
+    params["price"] = request.price;
   }
 
   if (!request.client_order_id.empty()) {
-    j["label"] = request.client_order_id;
+    params["label"] = request.client_order_id;
   }
 
-  std::string endpoint = request.side == Side::BUY ? "/api/v2/private/buy" : "/api/v2/private/sell";
-  std::string body = j.dump();
+  // Deribit uses JSON-RPC 2.0 format
+  std::string method = request.side == Side::BUY ? "private/buy" : "private/sell";
+  std::string body = build_jsonrpc_request(method, params);
 
+  std::string endpoint = std::string("/api/v2/private/") + (request.side == Side::BUY ? "buy" : "sell");
   Response resp = execute_with_retry(endpoint, "POST", body);
 
   result.http_status = resp.http_status;
@@ -216,9 +218,14 @@ ExecutionGateway::Response ExecutionGateway::http_post(const std::string& endpoi
 
   struct curl_slist* headers = nullptr;
   headers = curl_slist_append(headers, "Content-Type: application/json");
-  std::string auth_header = get_auth_header();
-  if (!auth_header.empty()) {
-    headers = curl_slist_append(headers, auth_header.c_str());
+  
+  // For private endpoints, add access token
+  if (endpoint.find("/private/") != std::string::npos) {
+    std::string token = get_access_token();
+    if (!token.empty()) {
+      std::string auth_header = "Authorization: Bearer " + token;
+      headers = curl_slist_append(headers, auth_header.c_str());
+    }
   }
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -344,11 +351,61 @@ int ExecutionGateway::calculate_backoff_ms(int attempt) const {
 }
 
 std::string ExecutionGateway::get_auth_header() const {
-  // Simplified auth - in production, use proper signature-based auth
-  if (api_key_.empty()) {
-    return "";
+  // Deribit uses client credentials, not headers for auth
+  // Authentication is done via /public/auth endpoint
+  return "";
+}
+
+std::string ExecutionGateway::build_jsonrpc_request(const std::string& method, const json& params) const {
+  json request;
+  request["jsonrpc"] = "2.0";
+  request["id"] = 1;
+  request["method"] = method;
+  request["params"] = params;
+  return request.dump();
+}
+
+std::string ExecutionGateway::get_access_token() {
+  // Check if we have a valid cached token
+  auto now = std::chrono::steady_clock::now();
+  if (!access_token_.empty() && now < token_expiry_) {
+    return access_token_;
   }
-  return "Authorization: Bearer " + api_key_;
+
+  // Authenticate and get new access token
+  json params;
+  params["grant_type"] = "client_credentials";
+  params["client_id"] = api_key_;
+  params["client_secret"] = api_secret_;
+
+  std::string body = build_jsonrpc_request("public/auth", params);
+  
+  Response resp = http_post("/api/v2/public/auth", body);
+  
+  if (resp.success) {
+    try {
+      json response = json::parse(resp.body);
+      if (response.contains("result")) {
+        access_token_ = response["result"]["access_token"].get<std::string>();
+        int expires_in = response["result"]["expires_in"].get<int>();
+        
+        // Set expiry to 90% of actual expiry for safety margin
+        token_expiry_ = now + std::chrono::seconds(expires_in * 9 / 10);
+        
+        if (logger_) {
+          logger_->log_info("ExecutionGateway", "Successfully authenticated with Deribit");
+        }
+        return access_token_;
+      }
+    } catch (const std::exception& e) {
+      if (logger_) {
+        logger_->log_error("ExecutionGateway", 
+                          std::string("Auth failed: ") + e.what());
+      }
+    }
+  }
+  
+  return "";
 }
 
 } // namespace pulseexec
